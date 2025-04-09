@@ -27,9 +27,9 @@ QT Robot Math est une application web interactive conçue pour aider les enfants
 1. Clonez le dépôt GitHub :
 
 ```bash
-[git clone https://github.com/votre-utilisateur/qt-robot-math.git](https://github.com/YasserRazzaki/qt-robot-math.git)
+git clone https://github.com/YasserRazzaki/qt-robot-math.git
 cd qt-robot-math
-
+```
 
 2. Installez les dépendances :
 
