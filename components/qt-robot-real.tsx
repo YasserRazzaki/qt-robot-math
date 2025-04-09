@@ -1,8 +1,9 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import Image from "next/image"
+import { useSpeechSynthesis } from "@/hooks/use-speech-synthesis"
 
 interface QTRobotProps {
   isCorrect?: boolean | null
@@ -10,6 +11,9 @@ interface QTRobotProps {
   operation?: string
   explanation?: string
   isHomepage?: boolean
+  audioEnabled?: boolean
+  isAskingQuestion?: boolean
+  questionResult?: boolean | null
 }
 
 export default function QTRobotReal({
@@ -18,16 +22,25 @@ export default function QTRobotReal({
   operation = "addition",
   explanation = "",
   isHomepage = false,
+  audioEnabled = true,
+  isAskingQuestion = false,
+  questionResult = null,
 }: QTRobotProps) {
-  const [speaking, setSpeaking] = useState(false)
+  const [showBubble, setShowBubble] = useState(false)
   const [message, setMessage] = useState("")
   const [hover, setHover] = useState(false)
   const [expression, setExpression] = useState("initial")
+  const { speak, cancel, speaking, supported, error } = useSpeechSynthesis()
+  const bubbleTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const [lastSpokenText, setLastSpokenText] = useState("")
 
   // Gérer les expressions faciales en fonction de l'état
   useEffect(() => {
     if (isHomepage) {
       setExpression(hover ? "happy" : "initial")
+    } else if (isAskingQuestion) {
+      // Expression curieuse quand le robot pose une question
+      setExpression(questionResult === null ? "initial" : questionResult ? "happy" : "sad")
     } else {
       if (isCorrect === true) {
         setExpression("happy")
@@ -37,19 +50,42 @@ export default function QTRobotReal({
         setExpression("initial")
       }
     }
-  }, [isCorrect, hover, isHomepage])
+  }, [isCorrect, hover, isHomepage, isAskingQuestion, questionResult])
+
+  // Fonction pour afficher un message dans la bulle
+  const showMessage = (text: string, duration = 4000, shouldSpeak = false) => {
+    // Nettoyer tout timer existant
+    if (bubbleTimerRef.current) {
+      clearTimeout(bubbleTimerRef.current)
+      bubbleTimerRef.current = null
+    }
+
+    // Afficher le message
+    setMessage(text)
+    setShowBubble(true)
+
+    // Parler si nécessaire - Nous ne parlons plus ici car la parole est gérée dans la page principale
+    if (shouldSpeak && audioEnabled && supported && text !== lastSpokenText && !isAnswerChecked) {
+      speak(text)
+      setLastSpokenText(text)
+    }
+
+    // Masquer la bulle après la durée spécifiée
+    bubbleTimerRef.current = setTimeout(() => {
+      setShowBubble(false)
+    }, duration)
+  }
 
   // Gérer les messages du robot
   useEffect(() => {
     if (isHomepage) {
-      if (Math.random() > 0.7 || hover) {
-        const messages = hover
-          ? ["Salut! Tu veux apprendre les maths avec moi?", "Clique sur moi pour commencer!"]
-          : ["Bonjour! Je suis QT Robot!", "Je peux t'aider à apprendre les maths!"]
-        setMessage(messages[Math.floor(Math.random() * messages.length)])
-        setSpeaking(true)
-        const timer = setTimeout(() => setSpeaking(false), 3000)
-        return () => clearTimeout(timer)
+      if (hover) {
+        const messages = ["Salut! Tu veux apprendre les maths avec moi?", "Clique sur moi pour commencer!"]
+        const randomMessage = messages[Math.floor(Math.random() * messages.length)]
+        showMessage(randomMessage)
+      } else if (showBubble) {
+        // Si la bulle est affichée mais qu'on n'est plus en hover, la cacher
+        setShowBubble(false)
       }
     } else if (!isAnswerChecked) {
       // Messages d'encouragement aléatoires
@@ -63,40 +99,44 @@ export default function QTRobotReal({
 
       if (Math.random() > 0.7) {
         const randomMessage = encouragements[Math.floor(Math.random() * encouragements.length)]
-        setMessage(randomMessage)
-        setSpeaking(true)
-        const timer = setTimeout(() => setSpeaking(false), 3000)
-        return () => clearTimeout(timer)
+        showMessage(randomMessage)
       }
     } else if (isCorrect === true) {
-      setMessage("Bravo! C'est la bonne réponse!")
-      setSpeaking(true)
+      const successMessage = "Bravo! C'est la bonne réponse!"
+      showMessage(successMessage, 4000)
     } else if (isCorrect === false) {
-      setMessage("Ce n'est pas correct. Voyons pourquoi...")
-      setSpeaking(true)
+      const errorMessage = "Ce n'est pas correct. Voyons pourquoi..."
+      showMessage(errorMessage, 4000)
     }
-  }, [isCorrect, isAnswerChecked, operation, hover, isHomepage])
 
-  // Afficher l'explication
+    return () => {
+      if (bubbleTimerRef.current) {
+        clearTimeout(bubbleTimerRef.current)
+      }
+    }
+  }, [isCorrect, isAnswerChecked, operation, hover, isHomepage, audioEnabled, supported, showBubble])
+
+  // Gérer l'explication
   useEffect(() => {
     if (explanation && isAnswerChecked) {
-      const timer = setTimeout(() => {
-        setSpeaking(true)
-        setMessage(explanation)
-        const hideTimer = setTimeout(() => setSpeaking(false), 5000)
-        return () => clearTimeout(hideTimer)
-      }, 2000)
-      return () => clearTimeout(timer)
+      // Afficher l'explication dans la bulle
+      showMessage(explanation, 8000)
     }
   }, [explanation, isAnswerChecked])
 
-  // Fonction pour obtenir l'image d'expression faciale
-  // const getFaceImage = () => {
-  //   if (speaking) {
-  //     return "/qt-faces/initial.png" // Utiliser l'expression initiale pendant que le robot parle
-  //   }
-  //   return `/qt-faces/${expression}.png`
-  // }
+  // Annuler la synthèse vocale si l'audio est désactivé
+  useEffect(() => {
+    if (!audioEnabled && speaking) {
+      cancel()
+    }
+  }, [audioEnabled, speaking, cancel])
+
+  // Réinitialiser le dernier texte parlé lorsque isAnswerChecked devient false
+  useEffect(() => {
+    if (!isAnswerChecked) {
+      setLastSpokenText("")
+    }
+  }, [isAnswerChecked])
 
   return (
     <div
@@ -106,14 +146,17 @@ export default function QTRobotReal({
     >
       <motion.div
         className="relative"
-        animate={{
-          y: [0, -10, 0],
-        }}
-        transition={{
-          duration: 4,
-          repeat: Number.POSITIVE_INFINITY,
-          repeatType: "reverse",
-        }}
+        animate={isHomepage ? {} : { y: [0, -10, 0] }}
+        transition={
+          isHomepage
+            ? {}
+            : {
+                duration: 4,
+                repeat: Number.POSITIVE_INFINITY,
+                repeatType: "reverse",
+              }
+        }
+        whileHover={isHomepage ? { scale: 1.05, y: -10 } : {}}
       >
         {/* Robot principal - Image complète sans manipulation */}
         <div className="relative">
@@ -186,7 +229,7 @@ export default function QTRobotReal({
 
       {/* Bulle de dialogue */}
       <AnimatePresence>
-        {speaking && (
+        {showBubble && (
           <motion.div
             className={`absolute ${
               isHomepage ? "top-10 right-10" : "-top-10 right-0"
